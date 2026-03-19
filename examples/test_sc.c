@@ -1,10 +1,10 @@
 #include "hashtable_sc.h"
-#include "stdio.h"
+#include <stdio.h>
 #include <string.h>
 
 HT_INIT(MY_TABLE, char*, int); 
 
-int main(int argc, const char* argv[]) {
+int main() {
     HT_MY_TABLE table;
     MY_TABLE_INIT(&table);
     MY_TABLE_INSERT(&table, "apple", 10);

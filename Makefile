@@ -1,21 +1,40 @@
-BUILD_DIR 	:= build
-CC        	:= gcc
-CFLAGS    	:= -Wall -Wextra -O2
-EXP_DIR   	:= ./examples
-INCLUDE_DIR := .
+BUILD_DIR 		:= build
+TEST_OUT_DIR	:= $(BUILD_DIR)/tests
+EXP_OUT_DIR		:= $(BUILD_DIR)/examples
+CC        		:= gcc
+CFLAGS    		:= -Wall -Wextra -O2
+EXP_DIR   		:= ./examples
+TEST_DIR 		:= ./tests
+INCLUDE_DIR 	:= .
 
-SRCS      	:= $(wildcard $(EXP_DIR)/*.c)
+EXP_SRCS    := $(wildcard $(EXP_DIR)/*.c)
+TEST_SRCS      	:= $(wildcard $(TEST_DIR)/*.c)
 
-TARGETS   	:= $(patsubst $(EXP_DIR)/%.c, $(BUILD_DIR)/%, $(SRCS))
+EXP_TARGETS   	:= $(patsubst $(EXP_DIR)/%.c, $(EXP_OUT_DIR)/%, $(EXP_SRCS))
+TEST_TARGETS   	:= $(patsubst $(TEST_DIR)/%.c, $(TEST_OUT_DIR)/%, $(TEST_SRCS))
 
-all: $(BUILD_DIR) $(TARGETS)
+all: test exp
 
-$(BUILD_DIR)/%: $(EXP_DIR)/%.c | $(BUILD_DIR)
+.PHONY: test
+test: $(TEST_OUT_DIR) $(TEST_TARGETS)
+
+$(TEST_OUT_DIR)/%: $(TEST_DIR)/%.c | $(TEST_OUT_DIR)
 	@echo "compiler $< ..."
 	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) $< -o $@
 
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
+.PHONY: exp
+exp: $(EXP_OUT_DIR) $(EXP_TARGETS)
+
+$(EXP_OUT_DIR)/%: $(EXP_DIR)/%.c | $(EXP_OUT_DIR)
+	@echo "compiler $< ..."
+	$(CC) $(CFLAGS) -I$(INCLUDE_DIR) $< -o $@
+
+
+$(TEST_OUT_DIR): 
+	mkdir -p $(BUILD_DIR)/tests
+
+$(EXP_OUT_DIR): 
+	mkdir -p $(BUILD_DIR)/examples
 
 .PHONY: clean
 clean:
