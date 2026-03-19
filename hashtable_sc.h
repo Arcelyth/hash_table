@@ -44,7 +44,7 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         size_t count; \
         size_t capacity; \
         HTNode_##table_name** buckets; \
-    } HT_##table_name; \ 
+    } HT_##table_name; \
 \
     static int _table_name##_RESIZE(HT_##table_name* table, size_t new_cap) {  \
         HTNode_##table_name** new_buckets = (HTNode_##table_name**)calloc(new_cap, sizeof(HTNode_##table_name*)); \

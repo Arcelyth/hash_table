@@ -17,6 +17,11 @@ all: test exp
 
 .PHONY: test
 test: $(TEST_OUT_DIR) $(TEST_TARGETS)
+	@echo "=== Running Tests ==="
+	@for test in $(TEST_TARGETS); do \
+		$$test; \
+	done
+	@echo "=== All Tests Passed ===" \
 
 $(TEST_OUT_DIR)/%: $(TEST_DIR)/%.c | $(TEST_OUT_DIR)
 	@echo "compiler $< ..."
