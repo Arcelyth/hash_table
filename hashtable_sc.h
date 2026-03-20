@@ -10,6 +10,8 @@
 #define HT_INIT_CAPACITY 8
 #define HT_LOAD_FACTOR 0.75
 
+typedef uint32_t (*hash_func_t)(const void* key, size_t len);
+
 // djb2 string hashing algorithm
 static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     uint32_t hash = 5381;
@@ -33,6 +35,9 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
 )
 
 #define HT_INIT(table_name, k_type, v_type) \
+    typedef uint32_t (*hash_func_##table_name)(k_type key); \
+    typedef bool     (*eq_func_##table_name)(k_type a, k_type b); \
+\
     typedef struct HTNode_##table_name { \
         k_type key; \
         v_type value; \
@@ -43,8 +48,18 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     typedef struct { \
         size_t count; \
         size_t capacity; \
+        hash_func_##table_name hash_func; \
+        eq_func_##table_name eq_func; \
         HTNode_##table_name** buckets; \
     } HT_##table_name; \
+\
+    static inline uint32_t _default_hash_##table_name(k_type key) { \
+        return HT_AUTO_HASH(key); \
+    } \
+\
+    static inline bool _default_eq_##table_name(k_type a, k_type b) { \
+        return HT_AUTO_EQ(a, b); \
+    } \
 \
     static int _table_name##_RESIZE(HT_##table_name* table, size_t new_cap) {  \
         HTNode_##table_name** new_buckets = (HTNode_##table_name**)calloc(new_cap, sizeof(HTNode_##table_name*)); \
@@ -65,18 +80,27 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         return HT_OK; \
     } \
 \
-    int table_name##_INIT(HT_##table_name* table) { \
-        table->count = 0; \
-        table->capacity = HT_INIT_CAPACITY; \
-        table->buckets = (HTNode_##table_name**)calloc(HT_INIT_CAPACITY, sizeof(HTNode_##table_name*)); \
-        return table->buckets ? HT_OK : HT_ERROR; \
-    } \
-\
-    int table_name##_WITH_CAPACITY(HT_##table_name* table, size_t capacity) { \
+    int table_name##_INIT_EX( \
+        HT_##table_name* table, \
+        size_t capacity, \
+        hash_func_##table_name h_fn, \
+        eq_func_##table_name e_fn \
+    ) { \
         table->count = 0; \
         table->capacity = capacity; \
         table->buckets = (HTNode_##table_name**)calloc(capacity, sizeof(HTNode_##table_name*)); \
-        return table->buckets ? HT_OK : HT_ERROR; \
+        if (!table->buckets) return HT_ERROR; \
+        table->hash_func = h_fn ? h_fn : _default_hash_##table_name; \
+        table->eq_func = e_fn ? e_fn : _default_eq_##table_name; \
+        return HT_OK; \
+    } \
+\
+    int table_name##_INIT(HT_##table_name* table) { \
+        return table_name##_INIT_EX(table, HT_INIT_CAPACITY, NULL, NULL); \
+    } \
+\
+    int table_name##_WITH_CAPACITY(HT_##table_name* table, size_t capacity) { \
+        return table_name##_INIT_EX(table, capacity, NULL, NULL); \
     } \
 \
     int table_name##_INSERT(HT_##table_name* table, k_type key, v_type value) { \
@@ -84,7 +108,7 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
             if (_table_name##_RESIZE(table, table->capacity * 2) == HT_ERROR) \
                 return HT_ERROR; \
         } \
-        uint32_t hash = HT_AUTO_HASH(key); \
+        uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
         HTNode_##table_name* node = table->buckets[idx]; \
         while (node) { \
@@ -107,7 +131,7 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
 \
     int table_name##_REMOVE(HT_##table_name* table, k_type key) { \
         if (table->count == 0) return HT_ERROR; \
-        uint32_t hash = HT_AUTO_HASH(key); \
+        uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
         HTNode_##table_name* node = table->buckets[idx]; \
         HTNode_##table_name* prev = NULL; \
@@ -127,7 +151,7 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
 \
     int table_name##_CONTAINS(const HT_##table_name* table, k_type key) { \
         if (table->count == 0) return 0; \
-        uint32_t hash = HT_AUTO_HASH(key); \
+        uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
         HTNode_##table_name* node = table->buckets[idx]; \
         while (node) { \
@@ -139,7 +163,7 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
 \
     int table_name##_GET(const HT_##table_name* table, k_type key, v_type* value) { \
         if (table->count == 0) return HT_ERROR; \
-        uint32_t hash = HT_AUTO_HASH(key); \
+        uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
         HTNode_##table_name* node = table->buckets[idx]; \
         while (node) { \
@@ -212,7 +236,11 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         } \
         return keys; \
     } \
-\ 
+\
+    const k_type* table_name##_KEYS_CONST(const HT_##table_name* table) { \
+        return (const k_type*)table_name##_KEYS(table); \
+    } \
+\
     v_type* table_name##_VALUES(const HT_##table_name* table) { \
         v_type* values = (v_type*)malloc(sizeof(v_type) * table->count); \
         if (!values) return NULL; \
@@ -226,7 +254,10 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         } \
         return values; \
     } \
-
+\
+    const v_type* table_name##_VALUES_CONST(const HT_##table_name* table) { \
+        return (const v_type*)table_name##_VALUES(table); \
+    } \
 
 #endif
 

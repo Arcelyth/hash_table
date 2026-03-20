@@ -14,6 +14,15 @@ int contains_key(char** keys, size_t count, const char* target) {
     return 0;
 }
 
+int contains_key_const(const char** keys, size_t count, const char* target) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(keys[i], target) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int contains_value(int* values, size_t count, const int target) {
     for (size_t i = 0; i < count; i++) {
         if (values[i] == target) {
@@ -23,6 +32,14 @@ int contains_value(int* values, size_t count, const int target) {
     return 0;
 }
 
+int contains_value_const(const int* values, size_t count, const int target) {
+    for (size_t i = 0; i < count; i++) {
+        if (values[i] == target) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 int main() {
     HT_TEST_TABLE table;
@@ -78,12 +95,23 @@ int main() {
     assert(contains_key(keys, table.count, "three"));
     free(keys);
 
+    const char** const_keys = TEST_TABLE_KEYS_CONST(&table); 
+    assert(const_keys != NULL);
+    assert(contains_key_const(const_keys, table.count, "one"));
+    assert(contains_key_const(const_keys, table.count, "three"));
+    free(const_keys);
+
     // get all the values
     int* values = TEST_TABLE_VALUES(&table); 
     assert(values != NULL);
     assert(contains_value(values, table.count, 10));
     assert(contains_value(values, table.count, 3));
     free(values);
+
+    const int* const_values = TEST_TABLE_VALUES_CONST(&table); 
+    assert(const_values != NULL);
+    assert(contains_value_const(const_values, table.count, 10));
+    assert(contains_value_const(const_values, table.count, 3));
 
     // destroy hashtable
     TEST_TABLE_DESTROY(&table);
