@@ -72,6 +72,13 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         return table->buckets ? HT_OK : HT_ERROR; \
     } \
 \
+    int table_name##_WITH_CAPACITY(HT_##table_name* table, size_t capacity) { \
+        table->count = 0; \
+        table->capacity = capacity; \
+        table->buckets = (HTNode_##table_name**)calloc(capacity, sizeof(HTNode_##table_name*)); \
+        return table->buckets ? HT_OK : HT_ERROR; \
+    } \
+\
     int table_name##_INSERT(HT_##table_name* table, k_type key, v_type value) { \
         if (table->count >= table->capacity * HT_LOAD_FACTOR) { \
             if (_table_name##_RESIZE(table, table->capacity * 2) == HT_ERROR) \
@@ -187,6 +194,39 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     int table_name##_IS_EMPTY(const HT_##table_name* table) { \
         return table->count == 0 ? 1 : 0; \
     } \
+\
+    size_t table_name##_SIZE(const HT_##table_name* table) { \
+        return table->count; \
+    } \
+\
+    k_type* table_name##_KEYS(const HT_##table_name* table) { \
+        k_type* keys = (k_type*)malloc(sizeof(k_type) * table->count); \
+        if (!keys) return NULL; \
+        size_t key_count = 0; \
+        for (size_t i = 0; i < table->capacity; i++) { \
+            HTNode_##table_name* node = table->buckets[i]; \
+            while (node) { \
+                keys[key_count++] = node->key; \
+                node = node->next; \
+            } \
+        } \
+        return keys; \
+    } \
+\ 
+    v_type* table_name##_VALUES(const HT_##table_name* table) { \
+        v_type* values = (v_type*)malloc(sizeof(v_type) * table->count); \
+        if (!values) return NULL; \
+        size_t value_count = 0; \
+        for (size_t i = 0; i < table->capacity; i++) { \
+            HTNode_##table_name* node = table->buckets[i]; \
+            while (node) { \
+                values[value_count++] = node->value; \
+                node = node->next; \
+            } \
+        } \
+        return values; \
+    } \
+
 
 #endif
 

@@ -24,7 +24,7 @@ int main() {
         printf("Not contains apple!\n");
     }
 
-
+    printf("Now contains %ld fruits.\n", MY_TABLE_SIZE(&table));
     MY_TABLE_DESTROY(&table);
     return 0;
 }
