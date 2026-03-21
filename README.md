@@ -66,3 +66,9 @@ int main() {
 }
 ```
 
+See more examples here: [examples](./examples)  <br>
+
+Run `make test` to see if all the tests passed on your machine. <br>
+
+
+
