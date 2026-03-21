@@ -35,6 +35,10 @@
 #define HT_INIT_CAPACITY 8
 #define HT_LOAD_FACTOR 0.75
 
+#define HT_STATE_EMPTY 0
+#define HT_STATE_OCCUPIED 1
+#define HT_STATE_DELETED 2
+
 typedef uint32_t (*hash_func_t)(const void* key, size_t len);
 
 // djb2 string hashing algorithm
@@ -67,7 +71,7 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         k_type key; \
         v_type value; \
         uint32_t hash; \
-        struct HTNode_##table_name* next; \
+        uint8_t state; \
     } HTNode_##table_name; \
 \
     typedef HTNode_##table_name table_name##_ENTRY; \
@@ -75,17 +79,16 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     typedef struct { \
         size_t count; \
         size_t capacity; \
+        size_t used_slots; /* count + deleted slots */ \
         float load_factor; \
         hash_func_##table_name hash_func; \
         eq_func_##table_name eq_func; \
-        HTNode_##table_name** buckets; \
+        table_name##_ENTRY* entries; \
     } HT_##table_name; \
 \
     typedef struct { \
         HT_##table_name* hashtable; \
-        size_t bucket_index; \
-        HTNode_##table_name* prev; \
-        HTNode_##table_name* next; \
+        size_t index; \
     } HT_##table_name##_ITER; \
 \
     typedef struct { \
@@ -104,30 +107,31 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     } \
 \
     static int _##table_name##_RESIZE(HT_##table_name* table, size_t new_cap) {  \
-        HTNode_##table_name** new_buckets = (HTNode_##table_name**)calloc(new_cap, sizeof(HTNode_##table_name*)); \
-        if (!new_buckets) return HT_ERROR; \
+        table_name##_ENTRY* new_entries = (table_name##_ENTRY*)calloc(new_cap, sizeof(table_name##_ENTRY)); \
+        if (!new_entries) return HT_ERROR; \
         for (size_t i = 0; i < table->capacity; i++) { \
-            HTNode_##table_name* node = table->buckets[i]; \
-            while (node) { \
-                HTNode_##table_name* next = node->next; \
-                size_t dest = node->hash % new_cap; \
-                node->next = new_buckets[dest]; \
-                new_buckets[dest] = node; \
-                node = next; \
+            if (table->entries[i].state == HT_STATE_OCCUPIED) { \
+                size_t dest = table->entries[i].hash % new_cap; \
+                while (new_entries[dest].state == HT_STATE_OCCUPIED) { \
+                    dest = (dest + 1) % new_cap; \
+                } \
+                new_entries[dest] = table->entries[i]; \
             } \
         } \
-        free(table->buckets); \
-        table->buckets = new_buckets; \
+        free(table->entries); \
+        table->entries = new_entries; \
         table->capacity = new_cap; \
+        table->used_slots = table->count; \
         return HT_OK; \
     } \
 \
     int table_name##_WITH_CONFIG(HT_##table_name* table, HTConfig_##table_name* config) { \
         size_t cap = (config && config->init_capacity > 0) ? config->init_capacity : HT_INIT_CAPACITY; \
         table->count = 0; \
+        table->used_slots = 0; \
         table->capacity = cap; \
-        table->buckets = (HTNode_##table_name**)calloc(cap, sizeof(HTNode_##table_name*)); \
-        if (!table->buckets) return HT_ERROR; \
+        table->entries = (table_name##_ENTRY*)calloc(cap, sizeof(table_name##_ENTRY)); \
+        if (!table->entries) return HT_ERROR; \
         table->hash_func = (config && config->hash_fn) ? config->hash_fn : _default_hash_##table_name; \
         table->eq_func = (config && config->eq_fn) ? config->eq_fn : _default_eq_##table_name; \
         table->load_factor = (config && config->load_factor) ? config->load_factor : HT_LOAD_FACTOR; \
@@ -144,47 +148,49 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     } \
 \
     int table_name##_INSERT(HT_##table_name* table, k_type key, v_type value) { \
-        if (table->count >= table->capacity * table->load_factor) { \
+        if (table->used_slots >= table->capacity * table->load_factor) { \
             if (_##table_name##_RESIZE(table, table->capacity * 2) == HT_ERROR) \
                 return HT_ERROR; \
         } \
         uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
-        HTNode_##table_name* node = table->buckets[idx]; \
-        while (node) { \
-            if (node->hash == hash && table->eq_func(node->key, key)) { \
-                node->value = value; \
+        size_t first_deleted = (size_t)-1; \
+        while (1) { \
+            if (table->entries[idx].state == HT_STATE_EMPTY) { \
+                /* Prioritize using the first deleted when encountered first empty position on the detection path */ \
+                size_t target = (first_deleted != (size_t)-1) ? first_deleted : idx; \
+                table->entries[target].key = key; \
+                table->entries[target].value = value; \
+                table->entries[target].hash = hash; \
+                table->entries[target].state = HT_STATE_OCCUPIED; \
+                table->count++; \
+                if (target == idx) table->used_slots++; \
                 return HT_OK; \
+            } else if (table->entries[idx].state == HT_STATE_OCCUPIED) { \
+                if (table->entries[idx].hash == hash && table->eq_func(table->entries[idx].key, key)) { \
+                    table->entries[idx].value = value; \
+                    return HT_OK; \
+                } \
+            } else if (table->entries[idx].state == HT_STATE_DELETED) { \
+                if (first_deleted == (size_t)-1) first_deleted = idx; \
             } \
-            node = node->next; \
+            idx = (idx + 1) % table->capacity; \
         } \
-        HTNode_##table_name* new_node = (HTNode_##table_name*)malloc(sizeof(HTNode_##table_name)); \
-        if (!new_node) return HT_ERROR; \
-        new_node->key = key; \
-        new_node->value = value; \
-        new_node->hash = hash; \
-        new_node->next = table->buckets[idx]; \
-        table->buckets[idx] = new_node; \
-        table->count++; \
-        return HT_OK; \
     } \
 \
     int table_name##_REMOVE(HT_##table_name* table, k_type key) { \
         if (table->count == 0) return HT_ERROR; \
         uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
-        HTNode_##table_name* node = table->buckets[idx]; \
-        HTNode_##table_name* prev = NULL; \
-        while (node) { \
-            if (node->hash == hash && table->eq_func(node->key, key)) { \
-                if (prev) prev->next = node->next; \
-                else table->buckets[idx] = node->next; \
-                free(node); \
+        while (table->entries[idx].state != HT_STATE_EMPTY) { \
+            if (table->entries[idx].state == HT_STATE_OCCUPIED && \
+                table->entries[idx].hash == hash && table->eq_func(table->entries[idx].key, key) \
+            ) { \
+                table->entries[idx].state = HT_STATE_DELETED; \
                 table->count--; \
                 return HT_OK; \
             } \
-            prev = node; \
-            node = node->next; \
+            idx = (idx + 1) % table->capacity; \
         } \
         return HT_ERROR; \
     } \
@@ -193,10 +199,14 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         if (table->count == 0) return 0; \
         uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
-        HTNode_##table_name* node = table->buckets[idx]; \
-        while (node) { \
-            if (node->hash == hash && table->eq_func(node->key, key)) return 1; \
-            node = node->next; \
+        \
+        while (table->entries[idx].state != HT_STATE_EMPTY) { \
+            if (table->entries[idx].state == HT_STATE_OCCUPIED && \
+                table->entries[idx].hash == hash && table->eq_func(table->entries[idx].key, key) \
+            ) { \
+                return 1; \
+            } \
+            idx = (idx + 1) % table->capacity; \
         } \
         return 0; \
     } \
@@ -205,51 +215,44 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         if (table->count == 0) return HT_ERROR; \
         uint32_t hash = table->hash_func(key); \
         size_t idx = hash % table->capacity; \
-        HTNode_##table_name* node = table->buckets[idx]; \
-        while (node) { \
-            if (node->hash == hash && table->eq_func(node->key, key)) { \
-                if (value) *value = node->value; \
+        \
+        while (table->entries[idx].state != HT_STATE_EMPTY) { \
+            if (table->entries[idx].state == HT_STATE_OCCUPIED && \
+                table->entries[idx].hash == hash && table->eq_func(table->entries[idx].key, key) \
+            ) { \
+                if (value) *value = table->entries[idx].value; \
                 return HT_OK; \
             } \
-            node = node->next; \
+            idx = (idx + 1) % table->capacity; \
         } \
         return HT_ERROR; \
     } \
 \
     int table_name##_CLEAR(HT_##table_name* table) { \
-        if (!table || !table->buckets) return HT_OK; \
-        for (size_t i = 0; i < table->capacity; i++) { \
-            HTNode_##table_name* curr = table->buckets[i]; \
-            while (curr) { \
-                HTNode_##table_name* next_node = curr->next; \
-                free(curr); \
-                curr = next_node; \
-            } \
-            table->buckets[i] = NULL; \
-        } \
+        if (!table || !table->entries) return HT_OK; \
+        memset(table->entries, 0, table->capacity * sizeof(table_name##_ENTRY)); \
         table->count = 0; \
+        table->used_slots = 0; \
         return HT_OK; \
     } \
 \
     int table_name##_DESTROY(HT_##table_name* table) { \
         if (!table) return HT_OK; \
-        table_name##_CLEAR(table); \
-        if (table->buckets) { \
-            free(table->buckets); \
-            table->buckets = NULL; \
+        if (table->entries) { \
+            free(table->entries); \
+            table->entries = NULL; \
         } \
         table->capacity = 0; \
         table->count = 0; \
+        table->used_slots = 0; \
         return HT_OK; \
     } \
 \
     int table_name##_COPY(const HT_##table_name* src, HT_##table_name* dest) { \
         for (size_t i = 0; i < src->capacity; i++) { \
-            HTNode_##table_name* node = src->buckets[i]; \
-            while (node) { \
-                if (table_name##_INSERT(dest, node->key, node->value) != HT_OK) \
+            if (src->entries[i].state == HT_STATE_OCCUPIED) { \
+                if (table_name##_INSERT(dest, src->entries[i].key, src->entries[i].value) != HT_OK) \
                     return HT_ERROR; \
-                node = node->next; \
             } \
         } \
         return HT_OK; \
@@ -268,10 +271,8 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         if (!keys) return NULL; \
         size_t key_count = 0; \
         for (size_t i = 0; i < table->capacity; i++) { \
-            HTNode_##table_name* node = table->buckets[i]; \
-            while (node) { \
-                keys[key_count++] = node->key; \
-                node = node->next; \
+            if (table->entries[i].state == HT_STATE_OCCUPIED) { \
+                keys[key_count++] = table->entries[i].key; \
             } \
         } \
         return keys; \
@@ -286,10 +287,8 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         if (!values) return NULL; \
         size_t value_count = 0; \
         for (size_t i = 0; i < table->capacity; i++) { \
-            HTNode_##table_name* node = table->buckets[i]; \
-            while (node) { \
-                values[value_count++] = node->value; \
-                node = node->next; \
+            if (table->entries[i].state == HT_STATE_OCCUPIED) { \
+                values[value_count++] = table->entries[i].value; \
             } \
         } \
         return values; \
@@ -301,36 +300,23 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
 \
     table_name##_ENTRY* table_name##_INTO_ITER(HT_##table_name* table, HT_##table_name##_ITER* iter) { \
         iter->hashtable = table; \
-        iter->bucket_index = 0; \
-        iter->prev = NULL; \
         for (size_t i = 0; i < table->capacity; i++) { \
-            HTNode_##table_name* node = table->buckets[i]; \
-            if (node != NULL) { \
-                iter->bucket_index = i; \
-                iter->next = node; \
-                return (table_name##_ENTRY*)iter->next; \
+            if (table->entries[i].state == HT_STATE_OCCUPIED) { \
+                iter->index = i; \
+                return &table->entries[i]; \
             } \
         } \
         return NULL; \
     } \
 \
     table_name##_ENTRY* table_name##_NEXT(HT_##table_name##_ITER* iter) { \
-        if (iter->next == NULL) return NULL; \
-        iter->prev = iter->next; \
-        iter->next = iter->next->next; \
-        if (iter->next != NULL) return (table_name##_ENTRY*)iter->next; \
-        for (size_t i = iter->bucket_index + 1; i < iter->hashtable->capacity; i++) { \
-            if (iter->hashtable->buckets[i] != NULL) { \
-                iter->bucket_index = i; \
-                iter->next = iter->hashtable->buckets[i]; \
-                return (table_name##_ENTRY*)iter->next; \
+        for (size_t i = iter->index + 1; i < iter->hashtable->capacity; i++) { \
+            if (iter->hashtable->entries[i].state == HT_STATE_OCCUPIED) { \
+                iter->index = i; \
+                return &iter->hashtable->entries[i]; \
             } \
         } \
-        iter->next = NULL; \
         return NULL; \
     } \
 
-
 #endif
-
-
