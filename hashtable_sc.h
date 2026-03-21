@@ -1,3 +1,28 @@
+/*
+ * Copyright (c) 2026 Arcelyth
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ * 
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * 
+ */
+
+
 #ifndef HASH_TABLE_SC_H
 #define HASH_TABLE_SC_H
 
@@ -45,6 +70,8 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         struct HTNode_##table_name* next; \
     } HTNode_##table_name; \
 \
+    typedef HTNode_##table_name table_name##_ENTRY; \
+\
     typedef struct { \
         size_t count; \
         size_t capacity; \
@@ -52,6 +79,13 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
         eq_func_##table_name eq_func; \
         HTNode_##table_name** buckets; \
     } HT_##table_name; \
+\
+    typedef struct { \
+        HT_##table_name* hashtable; \
+        size_t bucket_index; \
+        HTNode_##table_name* prev; \
+        HTNode_##table_name* next; \
+    } HT_##table_name##_ITER; \
 \
     static inline uint32_t _default_hash_##table_name(k_type key) { \
         return HT_AUTO_HASH(key); \
@@ -258,6 +292,38 @@ static inline uint32_t _ht_djb2_internal(const void* raw_key, size_t len) {
     const v_type* table_name##_VALUES_CONST(const HT_##table_name* table) { \
         return (const v_type*)table_name##_VALUES(table); \
     } \
+\
+    table_name##_ENTRY* table_name##_INTO_ITER(HT_##table_name* table, HT_##table_name##_ITER* iter) { \
+        iter->hashtable = table; \
+        iter->bucket_index = 0; \
+        iter->prev = NULL; \
+        for (size_t i = 0; i < table->capacity; i++) { \
+            HTNode_##table_name* node = table->buckets[i]; \
+            if (node != NULL) { \
+                iter->bucket_index = i; \
+                iter->next = node; \
+                return (table_name##_ENTRY*)iter->next; \
+            } \
+        } \
+        return NULL; \
+    } \
+\
+    table_name##_ENTRY* table_name##_NEXT(HT_##table_name##_ITER* iter) { \
+        if (iter->next == NULL) return NULL; \
+        iter->prev = iter->next; \
+        iter->next = iter->next->next; \
+        if (iter->next != NULL) return (table_name##_ENTRY*)iter->next; \
+        for (size_t i = iter->bucket_index + 1; i < iter->hashtable->capacity; i++) { \
+            if (iter->hashtable->buckets[i] != NULL) { \
+                iter->bucket_index = i; \
+                iter->next = iter->hashtable->buckets[i]; \
+                return (table_name##_ENTRY*)iter->next; \
+            } \
+        } \
+        iter->next = NULL; \
+        return NULL; \
+    } \
+
 
 #endif
 
