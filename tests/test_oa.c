@@ -115,6 +115,6 @@ int main() {
 
     // destroy hashtable
     TEST_TABLE_DESTROY(&table);
-    printf("[PASS] test_sc\n");
+    printf("[PASS] test_oa\n");
     return 0;
 }

@@ -1,4 +1,4 @@
-#include "hashtable_sc.h"
+#include "hashtable_oa.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -39,8 +39,7 @@ int main() {
     TEST_TABLE2_INSERT(&table2, &p2, 10);
     assert(TEST_TABLE2_CONTAINS(&table2, &p2));
 
-    printf("[PASS] test_sc_custom_type\n");
+    printf("[PASS] test_oa_custom_type\n");
 }
-
 
 

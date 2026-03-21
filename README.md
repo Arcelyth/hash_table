@@ -1,6 +1,6 @@
 # Hash_table
 
-Hashtable implementation in pure C macro.
+Open Addressing and Separate Chaining Hashtables implementation in pure C macro.
 
 ## Usage 
 
